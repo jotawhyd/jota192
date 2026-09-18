@@ -1,0 +1,415 @@
+--[[
+    Server Hop GUI - v2
+    -----------------------------------------
+    LocalScript. Coloque em StarterPlayerScripts,
+    StarterGui, ou rode via executor.
+
+    - Janela principal pequena, arrastável, com botão X
+    - Botão Refresh grande no meio
+    - Ao clicar em Refresh, abre uma SEGUNDA janela (separada,
+      também arrastável e com X própria) listando os 30
+      melhores servidores (menos players, depois menor ping)
+    - Sem emojis, sem sombra, tratamento de erro com retry
+--]]
+
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+
+local player = Players.LocalPlayer
+local placeId = game.PlaceId
+local currentJobId = game.JobId
+
+-- ======================= PALETA =======================
+local COLORS = {
+    Background  = Color3.fromRGB(253, 235, 243),
+    TitleBar    = Color3.fromRGB(214, 79, 137),
+    Accent      = Color3.fromRGB(232, 104, 156),
+    AccentDark  = Color3.fromRGB(179, 55, 108),
+    ButtonText  = Color3.fromRGB(255, 255, 255),
+    RowEven     = Color3.fromRGB(250, 222, 235),
+    RowOdd      = Color3.fromRGB(244, 202, 222),
+    Text        = Color3.fromRGB(80, 30, 52),
+    Close       = Color3.fromRGB(196, 60, 96),
+    Stroke      = Color3.fromRGB(214, 79, 137),
+    TitleAccentText = Color3.fromRGB(255, 235, 60), -- cor marcante (amarelo vibrante) pro título
+}
+
+-- ======================= HELPERS DE UI =======================
+
+local function makeCorner(radius, parent)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, radius)
+    c.Parent = parent
+    return c
+end
+
+local function makeStroke(color, thickness, parent)
+    local s = Instance.new("UIStroke")
+    s.Color = color
+    s.Thickness = thickness
+    s.Parent = parent
+    return s
+end
+
+-- Torna um frame arrastável usando outro frame (ex: barra de título) como "handle"
+local function makeDraggable(frame, handle)
+    local dragging = false
+    local dragInput, dragStart, startPos
+
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    handle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
+
+-- ======================= SCREENGUI RAIZ =======================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ServerHopGUI"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+-- ======================= JANELA PRINCIPAL =======================
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 220, 0, 130)
+mainFrame.Position = UDim2.new(0, 16, 0, 16)
+mainFrame.BackgroundColor3 = COLORS.Background
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+makeCorner(10, mainFrame)
+makeStroke(COLORS.Stroke, 1.5, mainFrame)
+
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 32)
+titleBar.BackgroundColor3 = COLORS.TitleBar
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+makeCorner(10, titleBar)
+
+local titleCoverBottom = Instance.new("Frame")
+titleCoverBottom.BackgroundColor3 = COLORS.TitleBar
+titleCoverBottom.BorderSizePixel = 0
+titleCoverBottom.Size = UDim2.new(1, 0, 0, 10)
+titleCoverBottom.Position = UDim2.new(0, 0, 1, -10)
+titleCoverBottom.ZIndex = 1
+titleCoverBottom.Parent = titleBar
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.BackgroundTransparency = 1
+titleLabel.Size = UDim2.new(1, -40, 1, 0)
+titleLabel.Position = UDim2.new(0, 10, 0, 0)
+titleLabel.Font = Enum.Font.GothamBlack
+titleLabel.Text = "Finder By Jota"
+titleLabel.TextColor3 = COLORS.TitleAccentText
+titleLabel.TextSize = 14
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.ZIndex = 2
+titleLabel.Parent = titleBar
+
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0, 22, 0, 22)
+closeButton.Position = UDim2.new(1, -28, 0.5, -11)
+closeButton.BackgroundColor3 = COLORS.Close
+closeButton.Text = "X"
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 13
+closeButton.TextColor3 = COLORS.ButtonText
+closeButton.ZIndex = 2
+closeButton.Parent = titleBar
+makeCorner(6, closeButton)
+
+closeButton.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+end)
+
+makeDraggable(mainFrame, titleBar)
+
+-- Botão Refresh grande, ocupando a maior parte da janela principal
+local refreshButton = Instance.new("TextButton")
+refreshButton.Size = UDim2.new(1, -24, 1, -46)
+refreshButton.Position = UDim2.new(0, 12, 0, 40)
+refreshButton.BackgroundColor3 = COLORS.Accent
+refreshButton.Text = "Refresh"
+refreshButton.Font = Enum.Font.GothamBold
+refreshButton.TextSize = 20
+refreshButton.TextColor3 = COLORS.ButtonText
+refreshButton.AutoButtonColor = true
+refreshButton.Parent = mainFrame
+makeCorner(8, refreshButton)
+makeStroke(COLORS.AccentDark, 1.5, refreshButton)
+
+-- ======================= LÓGICA DE SERVIDORES =======================
+
+local function safeHttpGet(url, attempts)
+    attempts = attempts or 3
+    for i = 1, attempts do
+        local ok, result = pcall(function()
+            return game:HttpGet(url)
+        end)
+        if ok and result then
+            return true, result
+        end
+        task.wait(0.5)
+    end
+    return false, nil
+end
+
+local function fetchServers()
+    local allServers = {}
+    local cursor = ""
+    local pagesToFetch = 6
+    local baseUrl = "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100&cursor=%s"
+
+    for page = 1, pagesToFetch do
+        local url = baseUrl:format(placeId, HttpService:UrlEncode(cursor))
+        local ok, body = safeHttpGet(url, 3)
+        if not ok then break end
+
+        local decodeOk, decoded = pcall(function()
+            return HttpService:JSONDecode(body)
+        end)
+        if not decodeOk or not decoded or not decoded.data then break end
+
+        for _, server in ipairs(decoded.data) do
+            if server.id ~= currentJobId and server.playing and server.maxPlayers then
+                table.insert(allServers, {
+                    id = server.id,
+                    playing = server.playing,
+                    maxPlayers = server.maxPlayers,
+                    ping = server.ping or 999,
+                })
+            end
+        end
+
+        if decoded.nextPageCursor and decoded.nextPageCursor ~= "" then
+            cursor = decoded.nextPageCursor
+        else
+            break
+        end
+    end
+
+    return allServers
+end
+
+local function sortServers(servers)
+    table.sort(servers, function(a, b)
+        if a.playing ~= b.playing then
+            return a.playing < b.playing
+        end
+        return a.ping < b.ping
+    end)
+    return servers
+end
+
+-- ======================= JANELA DE RESULTADOS (segunda GUI) =======================
+
+local resultsFrame = nil -- referência à janela de resultados atualmente aberta
+
+local function closeResultsWindow()
+    if resultsFrame then
+        resultsFrame:Destroy()
+        resultsFrame = nil
+    end
+end
+
+local function createServerRow(parentScroll, server, index)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -6, 0, 38)
+    row.BackgroundColor3 = (index % 2 == 0) and COLORS.RowEven or COLORS.RowOdd
+    row.BorderSizePixel = 0
+    row.LayoutOrder = index
+    row.Parent = parentScroll
+    makeCorner(6, row)
+
+    local info = Instance.new("TextLabel")
+    info.BackgroundTransparency = 1
+    info.Size = UDim2.new(1, -80, 1, 0)
+    info.Position = UDim2.new(0, 8, 0, 0)
+    info.Font = Enum.Font.Gotham
+    info.TextSize = 12
+    info.TextColor3 = COLORS.Text
+    info.TextXAlignment = Enum.TextXAlignment.Left
+    info.Text = string.format("#%d   %d/%d   %dms", index, server.playing, server.maxPlayers, server.ping)
+    info.Parent = row
+
+    local joinButton = Instance.new("TextButton")
+    joinButton.Size = UDim2.new(0, 64, 0, 26)
+    joinButton.Position = UDim2.new(1, -70, 0.5, -13)
+    joinButton.BackgroundColor3 = COLORS.Accent
+    joinButton.Text = "Entrar"
+    joinButton.Font = Enum.Font.GothamBold
+    joinButton.TextSize = 12
+    joinButton.TextColor3 = COLORS.ButtonText
+    joinButton.Parent = row
+    makeCorner(6, joinButton)
+
+    joinButton.MouseButton1Click:Connect(function()
+        joinButton.Text = "..."
+        joinButton.Active = false
+        local ok, err = pcall(function()
+            TeleportService:TeleportToPlaceInstance(placeId, server.id, player)
+        end)
+        if not ok then
+            joinButton.Text = "Erro"
+            warn("Falha ao entrar no servidor:", err)
+            task.wait(1.5)
+            joinButton.Text = "Entrar"
+            joinButton.Active = true
+        end
+    end)
+end
+
+-- Cria a janela separada de resultados, com sua própria barra de título,
+-- botão X e conteúdo (status de loading e depois a lista)
+local function openResultsWindow()
+    closeResultsWindow() -- garante que só existe uma janela de resultados por vez
+
+    resultsFrame = Instance.new("Frame")
+    resultsFrame.Name = "ResultsFrame"
+    resultsFrame.Size = UDim2.new(0, 300, 0, 320)
+    resultsFrame.Position = UDim2.new(0, 248, 0, 16)
+    resultsFrame.BackgroundColor3 = COLORS.Background
+    resultsFrame.BorderSizePixel = 0
+    resultsFrame.Parent = screenGui
+    makeCorner(10, resultsFrame)
+    makeStroke(COLORS.Stroke, 1.5, resultsFrame)
+
+    local rTitleBar = Instance.new("Frame")
+    rTitleBar.Size = UDim2.new(1, 0, 0, 32)
+    rTitleBar.BackgroundColor3 = COLORS.TitleBar
+    rTitleBar.BorderSizePixel = 0
+    rTitleBar.Parent = resultsFrame
+    makeCorner(10, rTitleBar)
+
+    local rTitleCover = Instance.new("Frame")
+    rTitleCover.BackgroundColor3 = COLORS.TitleBar
+    rTitleCover.BorderSizePixel = 0
+    rTitleCover.Size = UDim2.new(1, 0, 0, 10)
+    rTitleCover.Position = UDim2.new(0, 0, 1, -10)
+    rTitleCover.ZIndex = 1
+    rTitleCover.Parent = rTitleBar
+
+    local rTitleLabel = Instance.new("TextLabel")
+    rTitleLabel.BackgroundTransparency = 1
+    rTitleLabel.Size = UDim2.new(1, -40, 1, 0)
+    rTitleLabel.Position = UDim2.new(0, 10, 0, 0)
+    rTitleLabel.Font = Enum.Font.GothamBold
+    rTitleLabel.Text = "Servidores"
+    rTitleLabel.TextColor3 = COLORS.ButtonText
+    rTitleLabel.TextSize = 14
+    rTitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    rTitleLabel.ZIndex = 2
+    rTitleLabel.Parent = rTitleBar
+
+    local rCloseButton = Instance.new("TextButton")
+    rCloseButton.Size = UDim2.new(0, 22, 0, 22)
+    rCloseButton.Position = UDim2.new(1, -28, 0.5, -11)
+    rCloseButton.BackgroundColor3 = COLORS.Close
+    rCloseButton.Text = "X"
+    rCloseButton.Font = Enum.Font.GothamBold
+    rCloseButton.TextSize = 13
+    rCloseButton.TextColor3 = COLORS.ButtonText
+    rCloseButton.ZIndex = 2
+    rCloseButton.Parent = rTitleBar
+    makeCorner(6, rCloseButton)
+
+    rCloseButton.MouseButton1Click:Connect(closeResultsWindow)
+
+    makeDraggable(resultsFrame, rTitleBar)
+
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Size = UDim2.new(1, -20, 0, 30)
+    statusLabel.Position = UDim2.new(0, 10, 0, 40)
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.TextSize = 13
+    statusLabel.TextColor3 = COLORS.AccentDark
+    statusLabel.Text = "Buscando servidores..."
+    statusLabel.Parent = resultsFrame
+
+    local scrollFrame = Instance.new("ScrollingFrame")
+    scrollFrame.Size = UDim2.new(1, -16, 1, -50)
+    scrollFrame.Position = UDim2.new(0, 8, 0, 40)
+    scrollFrame.BackgroundTransparency = 1
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scrollFrame.ScrollBarThickness = 5
+    scrollFrame.ScrollBarImageColor3 = COLORS.Accent
+    scrollFrame.Visible = false
+    scrollFrame.Parent = resultsFrame
+
+    local listLayout = Instance.new("UIListLayout")
+    listLayout.Padding = UDim.new(0, 5)
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    listLayout.Parent = scrollFrame
+
+    listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        scrollFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 10)
+    end)
+
+    task.spawn(function()
+        local ok, servers = pcall(fetchServers)
+
+        if not ok or not servers or #servers == 0 then
+            if resultsFrame then statusLabel.Text = "Nada encontrado. Tentando de novo..." end
+            task.wait(1)
+            local ok2, servers2 = pcall(fetchServers)
+            if ok2 and servers2 and #servers2 > 0 then
+                servers = servers2
+                ok = true
+            end
+        end
+
+        if not resultsFrame then return end -- janela foi fechada enquanto buscava
+
+        if ok and servers and #servers > 0 then
+            servers = sortServers(servers)
+            local top30 = {}
+            for i = 1, math.min(30, #servers) do
+                top30[i] = servers[i]
+            end
+
+            for i, server in ipairs(top30) do
+                createServerRow(scrollFrame, server, i)
+            end
+
+            statusLabel.Visible = false
+            scrollFrame.Visible = true
+        else
+            statusLabel.Text = "Não foi possível carregar os servidores."
+        end
+    end)
+end
+
+refreshButton.MouseButton1Click:Connect(openResultsWindow)
