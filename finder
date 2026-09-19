@@ -156,9 +156,9 @@ end)
 
 makeDraggable(mainFrame, titleBar)
 
--- Botão Refresh grande, ocupando a maior parte da janela principal
+-- Botão Refresh grande
 local refreshButton = Instance.new("TextButton")
-refreshButton.Size = UDim2.new(1, -24, 1, -46)
+refreshButton.Size = UDim2.new(1, -24, 0, 90)
 refreshButton.Position = UDim2.new(0, 12, 0, 40)
 refreshButton.BackgroundColor3 = COLORS.Accent
 refreshButton.Text = "Refresh"
@@ -169,6 +169,33 @@ refreshButton.AutoButtonColor = true
 refreshButton.Parent = mainFrame
 makeCorner(8, refreshButton)
 makeStroke(COLORS.AccentDark, 1.5, refreshButton)
+
+-- Campo pra digitar o nome do jogador + botão de entrar no server dele
+local nameBox = Instance.new("TextBox")
+nameBox.Size = UDim2.new(1, -24, 0, 30)
+nameBox.Position = UDim2.new(0, 12, 0, 136)
+nameBox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+nameBox.PlaceholderText = "Nome do jogador"
+nameBox.Text = ""
+nameBox.Font = Enum.Font.Gotham
+nameBox.TextSize = 13
+nameBox.TextColor3 = COLORS.Text
+nameBox.PlaceholderColor3 = Color3.fromRGB(180, 150, 165)
+nameBox.ClearTextOnFocus = false
+nameBox.Parent = mainFrame
+makeCorner(6, nameBox)
+makeStroke(COLORS.Stroke, 1, nameBox)
+
+local joinPlayerButton = Instance.new("TextButton")
+joinPlayerButton.Size = UDim2.new(1, -24, 0, 26)
+joinPlayerButton.Position = UDim2.new(0, 12, 0, 170)
+joinPlayerButton.BackgroundColor3 = COLORS.AccentDark
+joinPlayerButton.Text = "Entrar no server dele"
+joinPlayerButton.Font = Enum.Font.GothamBold
+joinPlayerButton.TextSize = 12
+joinPlayerButton.TextColor3 = COLORS.ButtonText
+joinPlayerButton.Parent = mainFrame
+makeCorner(6, joinPlayerButton)
 
 -- ======================= LÓGICA DE SERVIDORES =======================
 
@@ -233,7 +260,7 @@ local function sortServers(servers)
     return servers
 end
 
--- ======================= JANELA DE RESULTADOS (segunda GUI) =======================
+-- ======================= LÓGICA DE SERVIDORES =======================
 
 local resultsFrame = nil -- referência à janela de resultados atualmente aberta
 
